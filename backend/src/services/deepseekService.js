@@ -22,16 +22,12 @@ export const generateResponse = async ({ character, conversationHistory, userMes
 
     // Build the messages array for DeepSeek API
     const messages = buildMessagesArray(character, conversationHistory, userMessage);
-    
-    logger.debug('Sending request to DeepSeek', {
-      characterId: character.id,
-      messageCount: messages.length,
-      model: AI_MODELS.DEEPSEEK_REASONER
-    });
+
+    console.log(messages);
 
     // Call DeepSeek API
     const response = await client.chat.completions.create({
-      model: AI_MODELS.DEEPSEEK_REASONER,
+      model: AI_MODELS.DEEPSEEK_CHAT,
       messages,
       temperature: 1.3,
       max_tokens: 500,
@@ -91,13 +87,7 @@ const buildMessagesArray = (character, conversationHistory, userMessage) => {
       });
     }
   }
-  
-  // Add current user message
-  messages.push({
-    role: 'user',
-    content: userMessage
-  });
-  
+
   return messages;
 };
 
