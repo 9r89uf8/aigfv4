@@ -1,9 +1,11 @@
 /**
  * Simple Character Service
- * Basic character operations without caching or complex features
+ * Basic character operations with Redis caching
  */
 import { getFirebaseFirestore } from '../config/firebase.js';
 import logger from '../utils/logger.js';
+import { getCacheValue, setCacheValue, deleteCacheValue, buildCacheKey } from './cacheService.js';
+import { config } from '../config/environment.js';
 
 const db = getFirebaseFirestore();
 
@@ -14,6 +16,17 @@ const db = getFirebaseFirestore();
  */
 export const getCharacterById = async (characterId) => {
   try {
+    // Build cache key
+    const cacheKey = buildCacheKey('character', characterId);
+    
+    // Check cache first
+    const cachedData = await getCacheValue(cacheKey);
+    if (cachedData) {
+      logger.debug(`Character ${characterId} retrieved from cache`);
+      return cachedData;
+    }
+    
+    // Cache miss - fetch from Firebase
     const characterRef = db.collection('characters').doc(characterId);
     const doc = await characterRef.get();
     
@@ -21,7 +34,13 @@ export const getCharacterById = async (characterId) => {
       return null;
     }
     
-    return { id: doc.id, ...doc.data() };
+    const characterData = { id: doc.id, ...doc.data() };
+    
+    // Store in cache for future requests
+    await setCacheValue(cacheKey, characterData, config.redis.ttl.character);
+    logger.debug(`Character ${characterId} cached`);
+    
+    return characterData;
   } catch (error) {
     logger.error('Error getting character:', error);
     throw error;
@@ -94,6 +113,10 @@ export const updateCharacter = async (characterId, updates) => {
     
     await db.collection('characters').doc(characterId).update(updateData);
     
+    // Invalidate cache for this character
+    const cacheKey = buildCacheKey('character', characterId);
+    await deleteCacheValue(cacheKey);
+    
     logger.info('Character updated', { characterId });
     
     return await getCharacterById(characterId);
@@ -114,6 +137,10 @@ export const deleteCharacter = async (characterId) => {
       isActive: false,
       updatedAt: Date.now()
     });
+    
+    // Invalidate cache for this character
+    const cacheKey = buildCacheKey('character', characterId);
+    await deleteCacheValue(cacheKey);
     
     logger.info('Character deactivated', { characterId });
   } catch (error) {
