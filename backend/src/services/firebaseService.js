@@ -6,6 +6,7 @@ import { getFirebaseFirestore } from '../config/firebase.js';
 import { FieldValue } from 'firebase-admin/firestore';
 import { v4 as uuidv4 } from 'uuid';
 import logger from '../utils/logger.js';
+import { getMessageList, pushMessage, deleteCacheValue, buildCacheKey } from './cacheService.js';
 
 const db = getFirebaseFirestore();
 
@@ -82,6 +83,9 @@ export const saveMessage = async (conversationId, messageData) => {
     
     logger.debug('Message saved', { conversationId, messageId, sender: messageData.sender });
     
+    // Push message to cache
+    await pushMessage(conversationId, message);
+    
     return message;
   } catch (error) {
     logger.error('Error saving message:', error);
@@ -97,6 +101,15 @@ export const saveMessage = async (conversationId, messageData) => {
  */
 export const getMessages = async (conversationId, limit = 50) => {
   try {
+    // Try to get messages from cache first
+    const cachedMessages = await getMessageList(conversationId, limit);
+    
+    if (cachedMessages && cachedMessages.length > 0) {
+      logger.debug(`Retrieved ${cachedMessages.length} messages from cache for conversation ${conversationId}`);
+      return cachedMessages;
+    }
+    
+    // Cache miss - fetch from Firebase
     const messagesRef = db
       .collection('conversations')
       .doc(conversationId)
@@ -111,7 +124,16 @@ export const getMessages = async (conversationId, limit = 50) => {
       messages.push({ id: doc.id, ...doc.data() });
     });
     
-    return messages.reverse(); // Return in chronological order
+    const orderedMessages = messages.reverse(); // Return in chronological order
+    
+    // Populate cache for next time (push each message individually to maintain order)
+    for (const message of orderedMessages) {
+      await pushMessage(conversationId, message);
+    }
+    
+    logger.debug(`Fetched ${orderedMessages.length} messages from Firebase and cached for conversation ${conversationId}`);
+    
+    return orderedMessages;
   } catch (error) {
     logger.error('Error getting messages:', error);
     throw error;
@@ -171,6 +193,11 @@ export const deleteConversation = async (conversationId) => {
     batch.delete(conversationRef);
     
     await batch.commit();
+    
+    // Clear message cache for this conversation
+    const cacheKey = buildCacheKey('messages', conversationId);
+    await deleteCacheValue(cacheKey);
+    
     logger.info('Conversation deleted', { conversationId });
   } catch (error) {
     logger.error('Error deleting conversation:', error);
