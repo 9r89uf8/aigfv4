@@ -64,22 +64,28 @@ export const saveMessage = async (conversationId, messageData) => {
       conversationId
     };
     
-    // Save message to messages subcollection
+    // Create a batch for atomic writes
+    const batch = db.batch();
+    
+    // Add message save to batch
     const messageRef = db
       .collection('conversations')
       .doc(conversationId)
       .collection('messages')
       .doc(messageId);
     
-    await messageRef.set(message);
+    batch.set(messageRef, message);
     
-    // Update conversation metadata
+    // Add conversation update to batch
     const conversationRef = db.collection('conversations').doc(conversationId);
-    await conversationRef.update({
+    batch.update(conversationRef, {
       updatedAt: timestamp,
       lastMessage: messageData.content || messageData.type,
       messageCount: FieldValue.increment(1)
     });
+    
+    // Commit both operations atomically
+    await batch.commit();
     
     logger.debug('Message saved', { conversationId, messageId, sender: messageData.sender });
     
