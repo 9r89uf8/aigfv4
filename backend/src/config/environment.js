@@ -71,26 +71,19 @@ export const config = {
     db: parseInt(process.env.REDIS_DB || '0'),
     keyPrefix: process.env.REDIS_KEY_PREFIX || 'aim:',
     ttl: {
-      default: 3600, // 1 hour
-      session: 86400, // 24 hours
-      cache: 300, // 5 minutes (for general short-term caching)
-      userProfile: 3600, // 1 hour (user profiles change occasionally)
-      character: 21600, // 6 hours (character data changes rarely)
-      conversation: 1800, // 30 minutes (conversations change frequently)
-      usage: 86400, // 24 hours (daily usage tracking reset)
+      default: parseInt(process.env.REDIS_TTL_DEFAULT || '3600'), // 1 hour
+      session: parseInt(process.env.REDIS_TTL_SESSION || '86400'), // 24 hours
+      cache: parseInt(process.env.REDIS_TTL_CACHE || '300'), // 5 minutes (for general short-term caching)
+      userProfile: parseInt(process.env.REDIS_TTL_USER_PROFILE || '3600'), // 1 hour (user profiles change occasionally)
+      character: parseInt(process.env.REDIS_TTL_CHARACTER || '21600'), // 6 hours (character data changes rarely)
+      conversation: parseInt(process.env.REDIS_TTL_CONVERSATION || '1800'), // 30 minutes (conversations change frequently)
       // Batch operation TTLs
-      messageBatch: 600, // 10 minutes (message batch buffer)
-      statsBatch: 3600, // 1 hour (stats batch buffer)
-      conversationBuffer: 900, // 15 minutes (conversation buffer)
-      conversationContext: 900 // 15 minutes (conversation context cache)
-    },
-    // Batch operation settings
-    batch: {
-      flushInterval: parseInt(process.env.REDIS_BATCH_FLUSH_INTERVAL || '60000'), // 60 seconds
-      maxBufferSize: parseInt(process.env.REDIS_BATCH_MAX_SIZE || '400'), // Max operations before force flush
-      lockTimeout: parseInt(process.env.REDIS_BATCH_LOCK_TIMEOUT || '10000'), // 10 seconds
-      retryAttempts: parseInt(process.env.REDIS_BATCH_RETRY_ATTEMPTS || '3'),
-      enableBatching: process.env.REDIS_ENABLE_BATCHING !== 'false' // Enable by default
+      conversationBuffer: parseInt(process.env.REDIS_TTL_CONVERSATION_BUFFER || '900'), // 15 minutes (conversation buffer)
+      conversationContext: parseInt(process.env.REDIS_TTL_CONVERSATION_CONTEXT || '900'), // 15 minutes (conversation context cache)
+      // Additional TTL values for hardcoded areas
+      messageList: parseInt(process.env.REDIS_TTL_MESSAGE_LIST || '1800'), // 30 minutes (message list cache)
+      queueCompleted: parseInt(process.env.REDIS_TTL_QUEUE_COMPLETED || '86400'), // 24 hours (completed job cleanup)
+      queueFailed: parseInt(process.env.REDIS_TTL_QUEUE_FAILED || '604800') // 7 days (failed job cleanup)
     }
   },
   
