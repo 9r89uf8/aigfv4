@@ -5,6 +5,8 @@
 import { Router } from 'express';
 import { getFirebaseFirestore } from '../config/firebase.js';
 import { isServiceAvailable } from '../services/deepseekService.js';
+import { getQueueStats } from '../queues/messageQueue.js';
+import { redisClient } from '../config/redis.js';
 import logger from '../utils/logger.js';
 
 const router = Router();
@@ -30,7 +32,9 @@ router.get('/ready', async (req, res) => {
   try {
     const checks = {
       firebase: false,
-      deepseek: false
+      deepseek: false,
+      redis: false,
+      queue: false
     };
     
     // Check Firebase
@@ -45,6 +49,23 @@ router.get('/ready', async (req, res) => {
     
     // Check DeepSeek
     checks.deepseek = isServiceAvailable();
+    
+    // Check Redis
+    try {
+      if (redisClient.isOpen) {
+        checks.redis = true;
+      }
+    } catch (error) {
+      logger.error('Redis health check failed:', error);
+    }
+    
+    // Check Queue
+    try {
+      const stats = await getQueueStats();
+      checks.queue = true;
+    } catch (error) {
+      logger.error('Queue health check failed:', error);
+    }
     
     const allHealthy = Object.values(checks).every(check => check === true);
     
@@ -77,6 +98,31 @@ router.get('/live', (req, res) => {
     memory: process.memoryUsage(),
     uptime: process.uptime()
   });
+});
+
+/**
+ * Queue statistics
+ * GET /health/queue
+ */
+router.get('/queue', async (req, res) => {
+  try {
+    const stats = await getQueueStats();
+    
+    res.status(200).json({
+      success: true,
+      message: 'Queue statistics',
+      stats,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error('Queue stats check failed:', error);
+    res.status(503).json({
+      success: false,
+      message: 'Failed to get queue statistics',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 export default router;

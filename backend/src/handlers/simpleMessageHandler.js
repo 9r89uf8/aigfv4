@@ -1,10 +1,10 @@
 /**
  * Simple Message Handler
- * Direct Socket.io -> DeepSeek -> Firebase flow without queues or complex processing
+ * Async message processing with BullMQ queue
  */
-import { getOrCreateConversation, saveMessage, getMessages } from '../services/firebaseService.js';
-import { generateResponse } from '../services/deepseekService.js';
-import { getCharacterById } from '../services/characterService.js';
+import { getMessages } from '../services/firebaseService.js';
+import { pushMessage } from '../services/cacheService.js';
+import { addMessageJob } from '../queues/messageQueue.js';
 import logger from '../utils/logger.js';
 
 /**
@@ -15,7 +15,7 @@ import logger from '../utils/logger.js';
 export const registerMessageHandlers = (socket, io) => {
   
   /**
-   * Handle sending a message - simple synchronous flow
+   * Handle sending a message - async queue flow
    */
   socket.on('message:send', async (data, callback) => {
     try {
@@ -31,82 +31,54 @@ export const registerMessageHandlers = (socket, io) => {
       
       logger.info('Processing message', { userId, characterId, type });
       
-      // 1. Ensure conversation exists
-      const conversation = await getOrCreateConversation(userId, characterId);
-      const conversationId = conversation.id;
+      // 1. Construct conversationId directly (no DB read needed)
+      // The worker will handle creating the conversation if it doesn't exist
+      const conversationId = `${userId}_${characterId}`;
       
-      // 2. Save user message to Firebase
-      const userMessage = await saveMessage(conversationId, {
+      // 2. Create user message object
+      const timestamp = Date.now();
+      const messageId = `msg_${timestamp}_${Math.random().toString(36).substr(2, 9)}`;
+      const userMessage = {
+        id: messageId,
         sender: 'user',
         type,
         content,
-        timestamp: Date.now()
-      });
+        timestamp,
+        conversationId
+      };
       
-      // Emit user message to conversation room
+      // 3. Save user message to Redis list immediately
+      await pushMessage(conversationId, userMessage);
+      
+      // 4. Emit user message to conversation room
       socket.to(`conversation:${conversationId}`).emit('message:receive', {
         message: userMessage,
         conversationId
       });
       
-      // Send immediate response to user
+      // 5. Queue AI response job
+      await addMessageJob({
+        conversationId,
+        characterId,
+        userMessage,
+        userId
+      });
+      
+      // 6. Return success immediately
       callback({ 
         success: true, 
         message: userMessage,
         conversationId 
       });
       
-      // 3. Get character data
-      const character = await getCharacterById(characterId);
-      if (!character) {
-        throw new Error('Character not found');
-      }
-      
-      // 4. Get conversation history for context
-      const conversationHistory = await getMessages(conversationId, 10);
-
-      // 5. Generate AI response with DeepSeek
-      logger.debug('Generating AI response', { characterId, conversationId });
-      
-      const aiResponseContent = await generateResponse({
-        character,
-        conversationHistory,
-        userMessage: content
-      });
-      
-      // 6. Save AI response to Firebase
-      const aiMessage = await saveMessage(conversationId, {
-        sender: 'character',
-        type: 'text',
-        content: aiResponseContent,
-        timestamp: Date.now()
-      });
-
-      // 7. Emit AI response to conversation room
-      // Get all sockets in the room
-      const socketsInRoom = await io.in(`conversation:${conversationId}`).fetchSockets();
-      
-      io.in(`conversation:${conversationId}`).emit('message:receive', {
-        message: aiMessage,
-        conversationId
-      });
-      
     } catch (error) {
       logger.error('Error processing message:', error);
       
-      // Emit error to user
-      socket.emit('message:error', {
-        error: 'Failed to process message. Please try again.',
-        timestamp: Date.now()
+      // Return error to user
+      callback({ 
+        success: false, 
+        error: 'Failed to process message' 
       });
-      
-      // If callback wasn't called yet, call it with error
-      if (callback) {
-        callback({ 
-          success: false, 
-          error: 'Failed to process message' 
-        });
-      }
     }
   });
   
@@ -132,13 +104,13 @@ export const registerMessageHandlers = (socket, io) => {
       // Join the conversation room
       socket.join(`conversation:${conversationId}`);
       
-      // Get conversation data
-      const conversation = await getOrCreateConversation(userId, characterId);
+      // Get messages - no need to fetch conversation data
+      // The conversation will be created when the first message is sent
       const messages = await getMessages(conversationId, 50);
       
       callback({ 
         success: true, 
-        conversation,
+        conversationId,
         messages 
       });
 

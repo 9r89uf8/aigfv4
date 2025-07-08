@@ -8,6 +8,9 @@ import { initializeFirebase } from './config/firebase.js';
 import { initializeDeepSeek } from './config/deepseek.js';
 import { initializeSocket } from './config/socket.js';
 import { registerMessageHandlers } from './handlers/simpleMessageHandler.js';
+import { initializeWorker, shutdownWorker } from './workers/messageWorker.js';
+import { closeQueue } from './queues/messageQueue.js';
+import { closeRedisConnection } from './config/redis.js';
 import logger from './utils/logger.js';
 
 /**
@@ -78,15 +81,39 @@ const startServer = async () => {
     });
     
     logger.info('Socket.io initialized');
+    
+    // Initialize message worker
+    logger.info('Initializing message worker...');
+    const messageWorker = initializeWorker(io);
+    logger.info('Message worker initialized');
 
     // Graceful shutdown handling
     const gracefulShutdown = async (signal) => {
       logger.info(`${signal} received, starting graceful shutdown...`);
       
-      server.close(() => {
+      // Stop accepting new connections
+      server.close(async () => {
         logger.info('HTTP server closed');
-        logger.info('Graceful shutdown completed');
-        process.exit(0);
+        
+        try {
+          // Shutdown worker
+          logger.info('Shutting down message worker...');
+          await shutdownWorker(messageWorker);
+          
+          // Close queue
+          logger.info('Closing message queue...');
+          await closeQueue();
+          
+          // Close Redis connection
+          logger.info('Closing Redis connection...');
+          await closeRedisConnection();
+          
+          logger.info('Graceful shutdown completed');
+          process.exit(0);
+        } catch (error) {
+          logger.error('Error during shutdown:', error);
+          process.exit(1);
+        }
       });
 
       // Force shutdown after 10 seconds

@@ -175,6 +175,86 @@ export const getUserConversations = async (userId, limit = 20) => {
 };
 
 /**
+ * Batch save user and AI messages atomically
+ * @param {string} conversationId - Conversation ID
+ * @param {Object} userMessage - User message data
+ * @param {Object} aiMessage - AI message data
+ * @param {string} userId - User ID (for conversation creation)
+ * @param {string} characterId - Character ID (for conversation creation)
+ * @returns {Promise<Object>} Saved messages
+ */
+export const batchSaveMessages = async (conversationId, userMessage, aiMessage, userId, characterId) => {
+  try {
+    const timestamp = Date.now();
+    const batch = db.batch();
+    
+    // Generate message IDs
+    const userMessageId = uuidv4();
+    const aiMessageId = uuidv4();
+    
+    // Prepare user message
+    const userMessageData = {
+      id: userMessageId,
+      ...userMessage,
+      timestamp: userMessage.timestamp || timestamp,
+      conversationId
+    };
+    
+    // Prepare AI message
+    const aiMessageData = {
+      id: aiMessageId,
+      ...aiMessage,
+      timestamp: aiMessage.timestamp || timestamp,
+      conversationId
+    };
+    
+    // Add user message to batch
+    const userMessageRef = db
+      .collection('conversations')
+      .doc(conversationId)
+      .collection('messages')
+      .doc(userMessageId);
+    batch.set(userMessageRef, userMessageData);
+    
+    // Add AI message to batch
+    const aiMessageRef = db
+      .collection('conversations')
+      .doc(conversationId)
+      .collection('messages')
+      .doc(aiMessageId);
+    batch.set(aiMessageRef, aiMessageData);
+    
+    // Update or create conversation metadata
+    const conversationRef = db.collection('conversations').doc(conversationId);
+    batch.set(conversationRef, {
+      userId,
+      characterId,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      lastMessage: aiMessage.content || aiMessage.type,
+      messageCount: FieldValue.increment(2) // Increment by 2 for both messages
+    }, { merge: true });
+    
+    // Commit all operations atomically
+    await batch.commit();
+    
+    logger.info('Batch saved messages', {
+      conversationId,
+      userMessageId,
+      aiMessageId
+    });
+    
+    return {
+      userMessage: userMessageData,
+      aiMessage: aiMessageData
+    };
+  } catch (error) {
+    logger.error('Error batch saving messages:', error);
+    throw error;
+  }
+};
+
+/**
  * Delete a conversation and all its messages
  * @param {string} conversationId - Conversation ID
  * @returns {Promise<void>}
@@ -214,6 +294,7 @@ export const deleteConversation = async (conversationId) => {
 export default {
   getOrCreateConversation,
   saveMessage,
+  batchSaveMessages,
   getMessages,
   getUserConversations,
   deleteConversation
